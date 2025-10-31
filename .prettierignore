@@ -1,0 +1,16 @@
+node_modules
+artifacts
+cache
+coverage
+dist
+types
+deployments
+fhevmTemp
+*.env
+*.env.*
+.env.example
+package-lock.json
+README.md
+TESTING.md
+DEPLOYMENT.md
+LICENSE
