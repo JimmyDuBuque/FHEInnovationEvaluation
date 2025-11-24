@@ -1,183 +1,257 @@
-const { ethers, network } = require("hardhat");
+const hre = require("hardhat");
+const ethers = hre.ethers;
 const fs = require("fs");
 const path = require("path");
 
-/**
- * Main deployment script for the Privacy Evaluation Platform
- * Deploys the contract and saves deployment information
- */
+// Color codes for console output
+const colors = {
+  reset: "\x1b[0m",
+  bright: "\x1b[1m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  blue: "\x1b[34m",
+  cyan: "\x1b[36m",
+};
+
+function log(message, color = colors.reset) {
+  console.log(`${color}${message}${colors.reset}`);
+}
+
 async function main() {
-  console.log("\n========================================");
-  console.log("Privacy Evaluation Platform Deployment");
-  console.log("========================================\n");
+  log("\n=== DApp 150 Smart Contract Deployment ===\n", colors.bright);
 
-  // Get deployment information
+  // Get deployer account
   const [deployer] = await ethers.getSigners();
+  log(`Deploying contracts from account: ${deployer.address}`, colors.cyan);
+
+  // Get network information
+  const network = await ethers.provider.getNetwork();
+  log(`Network: ${network.name} (Chain ID: ${network.chainId})`, colors.cyan);
+
+  // Get account balance
   const balance = await ethers.provider.getBalance(deployer.address);
-
-  console.log("Network Information:");
-  console.log("-------------------");
-  console.log("Network Name:", network.name);
-  console.log("Chain ID:", network.config.chainId);
-  console.log("RPC URL:", network.config.url || "default");
-  console.log();
-
-  console.log("Deployer Information:");
-  console.log("--------------------");
-  console.log("Address:", deployer.address);
-  console.log("Balance:", ethers.formatEther(balance), "ETH");
-  console.log();
-
-  // Check if deployer has sufficient balance
-  if (balance === 0n) {
-    console.error("Error: Deployer account has no balance!");
-    console.error("Please fund the account with test ETH before deploying.");
-    process.exit(1);
-  }
-
-  // Get contract factory
-  console.log("Preparing Contract Deployment...");
-  console.log("--------------------------------");
-
-  const ContractFactory = await ethers.getContractFactory("AnonymousInnovationEvaluation");
-  console.log("Contract Factory Created: AnonymousInnovationEvaluation");
-  console.log();
-
-  // Deploy contract
-  console.log("Deploying Contract...");
-  console.log("Please wait for transaction confirmation...");
-
-  const deploymentStartTime = Date.now();
-  const contract = await ContractFactory.deploy();
-
-  console.log("Transaction Hash:", contract.deploymentTransaction().hash);
-  console.log("Waiting for confirmation...");
-
-  await contract.waitForDeployment();
-  const contractAddress = await contract.getAddress();
-  const deploymentEndTime = Date.now();
-
-  console.log();
-  console.log("========================================");
-  console.log("Deployment Successful!");
-  console.log("========================================\n");
-
-  // Display deployment results
-  console.log("Contract Information:");
-  console.log("--------------------");
-  console.log("Contract Address:", contractAddress);
-  console.log("Deployer Address:", deployer.address);
-  console.log("Network:", network.name);
-  console.log("Chain ID:", network.config.chainId);
-  console.log("Deployment Time:", ((deploymentEndTime - deploymentStartTime) / 1000).toFixed(2), "seconds");
-  console.log();
-
-  // Get transaction receipt for gas information
-  const receipt = await contract.deploymentTransaction().wait();
-  console.log("Gas Information:");
-  console.log("----------------");
-  console.log("Gas Used:", receipt.gasUsed.toString());
-  console.log("Gas Price:", ethers.formatUnits(receipt.gasPrice || 0, "gwei"), "gwei");
-  console.log("Total Cost:", ethers.formatEther(receipt.gasUsed * (receipt.gasPrice || 0n)), "ETH");
-  console.log();
-
-  // Display Etherscan link for Sepolia
-  if (network.name === "sepolia") {
-    console.log("Verification:");
-    console.log("-------------");
-    console.log("Etherscan URL:", `https://sepolia.etherscan.io/address/${contractAddress}`);
-    console.log("Transaction URL:", `https://sepolia.etherscan.io/tx/${contract.deploymentTransaction().hash}`);
-    console.log();
-    console.log("To verify on Etherscan, run:");
-    console.log(`npm run verify -- ${contractAddress}`);
-    console.log();
-  }
-
-  // Save deployment information
-  const deploymentInfo = {
-    network: network.name,
-    chainId: network.config.chainId,
-    contractAddress: contractAddress,
-    deployerAddress: deployer.address,
-    deploymentTransaction: contract.deploymentTransaction().hash,
-    blockNumber: receipt.blockNumber,
-    gasUsed: receipt.gasUsed.toString(),
-    gasPrice: receipt.gasPrice ? receipt.gasPrice.toString() : "0",
-    timestamp: new Date().toISOString(),
-    contractName: "AnonymousInnovationEvaluation",
-  };
-
-  // Create deployments directory if it doesn't exist
-  const deploymentsDir = path.join(__dirname, "..", "deployments");
-  if (!fs.existsSync(deploymentsDir)) {
-    fs.mkdirSync(deploymentsDir, { recursive: true });
-  }
-
-  // Save deployment info to file
-  const deploymentFile = path.join(
-    deploymentsDir,
-    `${network.name}-${Date.now()}.json`
-  );
-  fs.writeFileSync(deploymentFile, JSON.stringify(deploymentInfo, null, 2));
-
-  // Also save as latest
-  const latestFile = path.join(deploymentsDir, `${network.name}-latest.json`);
-  fs.writeFileSync(latestFile, JSON.stringify(deploymentInfo, null, 2));
-
-  console.log("Deployment Information Saved:");
-  console.log("----------------------------");
-  console.log("File:", deploymentFile);
-  console.log("Latest:", latestFile);
-  console.log();
-
-  // Test basic contract functionality
-  console.log("Testing Contract Functions...");
-  console.log("-----------------------------");
+  log(`Account balance: ${ethers.utils.formatEther(balance)} ETH\n`, colors.cyan);
 
   try {
-    const owner = await contract.owner();
-    console.log("Contract Owner:", owner);
-    console.log("Owner Match:", owner === deployer.address ? "✓ Correct" : "✗ Mismatch");
+    // ============== 1. Deploy SecurityValidator ==============
+    log("Deploying SecurityValidator contract...", colors.yellow);
+    const SecurityValidator = await ethers.getContractFactory("SecurityValidator");
+    const securityValidator = await SecurityValidator.deploy();
+    await securityValidator.deployed();
 
-    const currentPeriod = await contract.getCurrentEvaluationPeriod();
-    console.log("Current Evaluation Period:", currentPeriod.toString());
+    log(`SecurityValidator deployed at: ${securityValidator.address}`, colors.green);
+    log(`Deployment transaction: ${securityValidator.deployTransaction.hash}\n`, colors.blue);
 
-    const nextProjectId = await contract.nextProjectId();
-    console.log("Next Project ID:", nextProjectId.toString());
+    // ============== 2. Deploy PrivacyPreservingDivision ==============
+    log("Deploying PrivacyPreservingDivision contract...", colors.yellow);
+    const PrivacyPreservingDivision = await ethers.getContractFactory(
+      "PrivacyPreservingDivision"
+    );
+    const privacyPreservingDivision = await PrivacyPreservingDivision.deploy();
+    await privacyPreservingDivision.deployed();
 
-    console.log();
-    console.log("✓ All basic checks passed");
+    log(
+      `PrivacyPreservingDivision deployed at: ${privacyPreservingDivision.address}`,
+      colors.green
+    );
+    log(
+      `Deployment transaction: ${privacyPreservingDivision.deployTransaction.hash}\n`,
+      colors.blue
+    );
+
+    // ============== 3. Deploy PriceObfuscation ==============
+    log("Deploying PriceObfuscation contract...", colors.yellow);
+    const PriceObfuscation = await ethers.getContractFactory("PriceObfuscation");
+    const priceObfuscation = await PriceObfuscation.deploy();
+    await priceObfuscation.deployed();
+
+    log(`PriceObfuscation deployed at: ${priceObfuscation.address}`, colors.green);
+    log(`Deployment transaction: ${priceObfuscation.deployTransaction.hash}\n`, colors.blue);
+
+    // ============== 4. Deploy GatewayTransaction ==============
+    log("Deploying GatewayTransaction contract...", colors.yellow);
+
+    // Use deployer as gateway address (can be changed later)
+    const gatewayAddress = deployer.address;
+    log(`Using gateway address: ${gatewayAddress}`, colors.cyan);
+
+    const GatewayTransaction = await ethers.getContractFactory("GatewayTransaction");
+    const gatewayTransaction = await GatewayTransaction.deploy(gatewayAddress);
+    await gatewayTransaction.deployed();
+
+    log(`GatewayTransaction deployed at: ${gatewayTransaction.address}`, colors.green);
+    log(`Deployment transaction: ${gatewayTransaction.deployTransaction.hash}\n`, colors.blue);
+
+    // ============== 5. Setup Initial Configuration ==============
+    log("Setting up initial configuration...", colors.yellow);
+
+    // Set default timeout to 1 hour (3600 seconds)
+    const DEFAULT_TIMEOUT = 3600;
+    log(`Setting request timeout to ${DEFAULT_TIMEOUT} seconds...`, colors.cyan);
+
+    const timeoutTx = await gatewayTransaction.setRequestTimeout(DEFAULT_TIMEOUT);
+    await timeoutTx.wait();
+    log(`Timeout set successfully. Transaction: ${timeoutTx.hash}`, colors.green);
+
+    // Verify timeout was set
+    const timeout = await gatewayTransaction.requestTimeout();
+    log(`Verified timeout: ${timeout.toString()} seconds\n`, colors.green);
+
+    // ============== 6. Verify Ownership and Permissions ==============
+    log("Verifying ownership and permissions...", colors.yellow);
+
+    const owner = await gatewayTransaction.owner();
+    const gateway = await gatewayTransaction.gatewayAddress();
+
+    log(`Contract owner: ${owner}`, colors.cyan);
+    log(`Gateway address: ${gateway}`, colors.cyan);
+
+    if (owner === deployer.address) {
+      log("Owner verification: PASSED", colors.green);
+    } else {
+      log("Owner verification: FAILED", colors.yellow);
+    }
+
+    if (gateway === gatewayAddress) {
+      log("Gateway verification: PASSED\n", colors.green);
+    } else {
+      log("Gateway verification: FAILED\n", colors.yellow);
+    }
+
+    // ============== 7. Log Deployment Summary ==============
+    log("\n=== Deployment Summary ===\n", colors.bright);
+
+    const deploymentSummary = {
+      network: network.name,
+      chainId: network.chainId,
+      deployer: deployer.address,
+      deploymentDate: new Date().toISOString(),
+      contracts: {
+        SecurityValidator: {
+          address: securityValidator.address,
+          txHash: securityValidator.deployTransaction.hash,
+          blockNumber: securityValidator.deployTransaction.blockNumber,
+        },
+        PrivacyPreservingDivision: {
+          address: privacyPreservingDivision.address,
+          txHash: privacyPreservingDivision.deployTransaction.hash,
+          blockNumber: privacyPreservingDivision.deployTransaction.blockNumber,
+        },
+        PriceObfuscation: {
+          address: priceObfuscation.address,
+          txHash: priceObfuscation.deployTransaction.hash,
+          blockNumber: priceObfuscation.deployTransaction.blockNumber,
+        },
+        GatewayTransaction: {
+          address: gatewayTransaction.address,
+          txHash: gatewayTransaction.deployTransaction.hash,
+          blockNumber: gatewayTransaction.deployTransaction.blockNumber,
+          owner: owner,
+          gatewayAddress: gateway,
+          requestTimeout: timeout.toString(),
+        },
+      },
+    };
+
+    // Log to console
+    log("SecurityValidator", colors.cyan);
+    log(`  Address: ${deploymentSummary.contracts.SecurityValidator.address}`, colors.blue);
+    log(
+      `  Transaction: ${deploymentSummary.contracts.SecurityValidator.txHash}`,
+      colors.blue
+    );
+
+    log("\nPrivacyPreservingDivision", colors.cyan);
+    log(
+      `  Address: ${deploymentSummary.contracts.PrivacyPreservingDivision.address}`,
+      colors.blue
+    );
+    log(
+      `  Transaction: ${deploymentSummary.contracts.PrivacyPreservingDivision.txHash}`,
+      colors.blue
+    );
+
+    log("\nPriceObfuscation", colors.cyan);
+    log(`  Address: ${deploymentSummary.contracts.PriceObfuscation.address}`, colors.blue);
+    log(`  Transaction: ${deploymentSummary.contracts.PriceObfuscation.txHash}`, colors.blue);
+
+    log("\nGatewayTransaction (Primary Contract)", colors.cyan);
+    log(`  Address: ${deploymentSummary.contracts.GatewayTransaction.address}`, colors.blue);
+    log(`  Transaction: ${deploymentSummary.contracts.GatewayTransaction.txHash}`, colors.blue);
+    log(`  Owner: ${deploymentSummary.contracts.GatewayTransaction.owner}`, colors.blue);
+    log(
+      `  Gateway: ${deploymentSummary.contracts.GatewayTransaction.gatewayAddress}`,
+      colors.blue
+    );
+    log(`  Timeout: ${deploymentSummary.contracts.GatewayTransaction.requestTimeout}s`, colors.blue);
+
+    // ============== 8. Save Deployment Info to File ==============
+    log("\n\nSaving deployment information...", colors.yellow);
+
+    const deploymentsDir = path.join(__dirname, "..", "deployments");
+    if (!fs.existsSync(deploymentsDir)) {
+      fs.mkdirSync(deploymentsDir, { recursive: true });
+    }
+
+    const deploymentFileName = `deployment-${network.name}-${Date.now()}.json`;
+    const deploymentFilePath = path.join(deploymentsDir, deploymentFileName);
+
+    fs.writeFileSync(deploymentFilePath, JSON.stringify(deploymentSummary, null, 2));
+    log(`Deployment info saved to: ${deploymentFilePath}`, colors.green);
+
+    // Also save latest deployment
+    const latestFilePath = path.join(deploymentsDir, "latest.json");
+    fs.writeFileSync(latestFilePath, JSON.stringify(deploymentSummary, null, 2));
+    log(`Latest deployment saved to: ${latestFilePath}`, colors.green);
+
+    // ============== 9. Post-Deployment Instructions ==============
+    log("\n\n=== Post-Deployment Instructions ===\n", colors.bright);
+
+    log("1. VERIFY CONTRACTS ON BLOCK EXPLORER", colors.yellow);
+    const explorerUrl =
+      network.chainId === 11155111
+        ? "https://sepolia.etherscan.io"
+        : `https://explorer.${network.name}.io`;
+    log(`   Go to: ${explorerUrl}`, colors.cyan);
+    log(
+      `   Verify each contract with its deployment transaction hash`,
+      colors.cyan
+    );
+
+    log("\n2. UPDATE ENVIRONMENT VARIABLES", colors.yellow);
+    log(`   GATEWAY_ADDRESS=${deploymentSummary.contracts.GatewayTransaction.address}`, colors.cyan);
+    log(`   OWNER_ADDRESS=${deploymentSummary.contracts.GatewayTransaction.owner}`, colors.cyan);
+
+    log("\n3. CONFIGURE GATEWAY SERVICE", colors.yellow);
+    log(`   Update your gateway service with these addresses:`, colors.cyan);
+    log(`   - GatewayTransaction: ${deploymentSummary.contracts.GatewayTransaction.address}`, colors.cyan);
+    log(`   - SecurityValidator: ${deploymentSummary.contracts.SecurityValidator.address}`, colors.cyan);
+
+    log("\n4. RUN INTEGRATION TESTS", colors.yellow);
+    log(`   npm test`, colors.cyan);
+
+    log("\n5. MONITOR DEPLOYMENTS", colors.yellow);
+    log(`   Check deployments/latest.json for latest deployment info`, colors.cyan);
+
+    // ============== 10. Summary ==============
+    log("\n\n=== Deployment Complete ===\n", colors.bright);
+    log(`All contracts deployed successfully!`, colors.green);
+    log(`Total contracts deployed: 4`, colors.green);
+    log(`Network: ${network.name}`, colors.green);
+    log(`Block number: ${await ethers.provider.getBlockNumber()}`, colors.green);
+
+    return deploymentSummary;
   } catch (error) {
-    console.error("✗ Error testing contract:", error.message);
+    log("\n\nDeployment failed with error:", colors.yellow);
+    console.error(error);
+    process.exitCode = 1;
   }
-
-  console.log();
-  console.log("========================================");
-  console.log("Deployment Complete!");
-  console.log("========================================\n");
-
-  return {
-    contract,
-    contractAddress,
-    deploymentInfo,
-  };
 }
 
 // Execute deployment
-if (require.main === module) {
-  main()
-    .then(() => process.exit(0))
-    .catch((error) => {
-      console.error("\n========================================");
-      console.error("Deployment Failed!");
-      console.error("========================================\n");
-      console.error("Error:", error.message);
-      if (error.stack) {
-        console.error("\nStack Trace:");
-        console.error(error.stack);
-      }
-      process.exit(1);
-    });
-}
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
 
-module.exports = main;
+module.exports = { main };

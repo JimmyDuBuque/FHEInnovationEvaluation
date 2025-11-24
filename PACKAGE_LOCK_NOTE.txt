@@ -1,0 +1,25 @@
+PACKAGE-LOCK.JSON GENERATION NOTE
+==================================
+
+The package-lock.json file is generated automatically when running:
+  npm install
+
+This file locks all dependency versions to ensure consistent installations
+across different environments and team members.
+
+Generation Instructions:
+1. Ensure package.json is properly configured with all dependencies
+2. Run: npm install
+3. Commit the generated package-lock.json to version control
+
+DO NOT manually edit package-lock.json.
+Always use npm commands to manage dependencies:
+  - npm install <package>
+  - npm update <package>
+  - npm remove <package>
+
+The package-lock.json file will be generated with these dependencies based on
+the project's package.json configuration.
+
+For more information, see:
+https://docs.npmjs.com/cli/v8/configuring-npm/package-lock-json

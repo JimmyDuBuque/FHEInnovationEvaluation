@@ -1,414 +1,213 @@
-const { ethers, network } = require("hardhat");
+const hre = require("hardhat");
 const fs = require("fs");
 const path = require("path");
-const readline = require("readline");
-
-/**
- * Interactive script for contract interaction
- * Allows testing and interacting with deployed contract functions
- */
-
-// Setup readline interface for user input
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
-
-const question = (query) => {
-  return new Promise((resolve) => {
-    rl.question(query, resolve);
-  });
-};
-
-let contract;
-let signer;
 
 async function loadContract() {
-  console.log("\n========================================");
-  console.log("Contract Interaction Script");
-  console.log("========================================\n");
+  const network = hre.network.name;
+  const deploymentFile = path.join(__dirname, "..", "deployments", `${network}-deployment.json`);
 
-  // Get contract address
-  let contractAddress = process.argv[2];
+  if (!fs.existsSync(deploymentFile)) {
+    throw new Error(`❌ Deployment file not found for network: ${network}\nPlease deploy the contract first using: npm run deploy`);
+  }
 
-  if (!contractAddress) {
-    const deploymentsDir = path.join(__dirname, "..", "deployments");
-    const latestFile = path.join(deploymentsDir, `${network.name}-latest.json`);
+  const deploymentInfo = JSON.parse(fs.readFileSync(deploymentFile, "utf8"));
+  const contractAddress = deploymentInfo.contractAddress;
 
-    if (fs.existsSync(latestFile)) {
-      const deploymentData = JSON.parse(fs.readFileSync(latestFile, "utf8"));
-      contractAddress = deploymentData.contractAddress;
-      console.log("Contract address loaded from deployment file");
-    } else {
-      console.error("Error: Contract address not provided");
-      console.log("\nUsage:");
-      console.log("  npm run interact -- <CONTRACT_ADDRESS>");
-      process.exit(1);
+  const contract = await hre.ethers.getContractAt("ConfidentialWasteRecycling", contractAddress);
+  return { contract, contractAddress, deploymentInfo };
+}
+
+async function getContractState(contract) {
+  console.log("\n📊 Current Contract State:");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+  const owner = await contract.owner();
+  const totalReports = await contract.totalReports();
+  const currentPeriod = await contract.currentPeriod();
+
+  console.log("👑 Owner:", owner);
+  console.log("📝 Total Reports:", totalReports.toString());
+  console.log("📅 Current Period:", currentPeriod.toString());
+
+  const periodInfo = await contract.getCurrentPeriodInfo();
+  console.log("\n📆 Current Period Details:");
+  console.log("   Period Number:", periodInfo[0].toString());
+  console.log("   Report Count:", periodInfo[1].toString());
+  console.log("   Start Time:", new Date(Number(periodInfo[2]) * 1000).toISOString());
+  console.log("   Is Finalized:", periodInfo[3]);
+
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+}
+
+async function authorizeReporter(contract, reporterAddress) {
+  console.log(`\n🔐 Authorizing reporter: ${reporterAddress}`);
+
+  const tx = await contract.authorizeReporter(reporterAddress);
+  console.log("⏳ Transaction sent:", tx.hash);
+
+  const receipt = await tx.wait();
+  console.log("✅ Reporter authorized! Gas used:", receipt.gasUsed.toString());
+
+  // Verify authorization
+  const isAuthorized = await contract.isAuthorizedReporter(reporterAddress);
+  console.log("✓ Authorization status:", isAuthorized);
+}
+
+async function addVerifier(contract, verifierAddress) {
+  console.log(`\n🔐 Adding verifier: ${verifierAddress}`);
+
+  const tx = await contract.addVerifier(verifierAddress);
+  console.log("⏳ Transaction sent:", tx.hash);
+
+  const receipt = await tx.wait();
+  console.log("✅ Verifier added! Gas used:", receipt.gasUsed.toString());
+
+  // Verify
+  const isVerifier = await contract.verifiers(verifierAddress);
+  console.log("✓ Verifier status:", isVerifier);
+}
+
+async function submitReport(contract, reportData) {
+  console.log("\n📝 Submitting recycling report...");
+  console.log("Report data:", reportData);
+
+  const tx = await contract.submitReport(
+    reportData.plasticWeight,
+    reportData.paperWeight,
+    reportData.glassWeight,
+    reportData.metalWeight,
+    reportData.organicWeight,
+    reportData.energyGenerated,
+    reportData.carbonReduced
+  );
+
+  console.log("⏳ Transaction sent:", tx.hash);
+
+  const receipt = await tx.wait();
+  console.log("✅ Report submitted! Gas used:", receipt.gasUsed.toString());
+
+  // Get the report ID from events
+  const event = receipt.logs.find(log => {
+    try {
+      return contract.interface.parseLog(log).name === "ReportSubmitted";
+    } catch {
+      return false;
     }
-  }
+  });
 
-  console.log("Network:", network.name);
-  console.log("Contract Address:", contractAddress);
-  console.log();
-
-  // Get signer
-  [signer] = await ethers.getSigners();
-  console.log("Signer Address:", signer.address);
-
-  const balance = await ethers.provider.getBalance(signer.address);
-  console.log("Signer Balance:", ethers.formatEther(balance), "ETH");
-  console.log();
-
-  // Connect to contract
-  const ContractFactory = await ethers.getContractFactory("AnonymousInnovationEvaluation");
-  contract = ContractFactory.attach(contractAddress);
-
-  console.log("Contract connected successfully!");
-  console.log();
-}
-
-async function displayMenu() {
-  console.log("\n========================================");
-  console.log("Available Actions:");
-  console.log("========================================");
-  console.log("1.  View Contract Information");
-  console.log("2.  View Current Evaluation Period");
-  console.log("3.  Submit New Project");
-  console.log("4.  View Project Details");
-  console.log("5.  Submit Evaluation");
-  console.log("6.  Authorize Evaluator");
-  console.log("7.  Revoke Evaluator");
-  console.log("8.  Start Evaluation Period");
-  console.log("9.  End Evaluation Period");
-  console.log("10. Reveal Project Results");
-  console.log("11. View All Projects in Period");
-  console.log("12. Check Evaluation Status");
-  console.log("0.  Exit");
-  console.log("========================================\n");
-
-  const choice = await question("Select an action (0-12): ");
-  return choice.trim();
-}
-
-async function viewContractInfo() {
-  console.log("\n--- Contract Information ---");
-  try {
-    const owner = await contract.owner();
-    const nextProjectId = await contract.nextProjectId();
-    const currentPeriod = await contract.getCurrentEvaluationPeriod();
-
-    console.log("Owner:", owner);
-    console.log("Next Project ID:", nextProjectId.toString());
-    console.log("Current Evaluation Period:", currentPeriod.toString());
-
-    const isOwner = owner.toLowerCase() === signer.address.toLowerCase();
-    console.log("You are owner:", isOwner ? "Yes" : "No");
-  } catch (error) {
-    console.error("Error:", error.message);
+  if (event) {
+    const parsedEvent = contract.interface.parseLog(event);
+    console.log("📋 Report ID:", parsedEvent.args.reportId.toString());
+    return parsedEvent.args.reportId;
   }
 }
 
-async function viewCurrentPeriod() {
-  console.log("\n--- Current Evaluation Period ---");
-  try {
-    const periodId = await contract.getCurrentEvaluationPeriod();
-    const periodInfo = await contract.getEvaluationPeriodInfo(periodId);
+async function verifyReport(contract, reportId) {
+  console.log(`\n✅ Verifying report #${reportId}...`);
 
-    console.log("Period ID:", periodId.toString());
-    console.log("Start Time:", new Date(Number(periodInfo[0]) * 1000).toLocaleString());
-    console.log("End Time:", new Date(Number(periodInfo[1]) * 1000).toLocaleString());
-    console.log("Is Active:", periodInfo[2] ? "Yes" : "No");
-    console.log("Total Projects:", periodInfo[3].toString());
-  } catch (error) {
-    console.error("Error:", error.message);
-  }
+  const tx = await contract.verifyReport(reportId);
+  console.log("⏳ Transaction sent:", tx.hash);
+
+  const receipt = await tx.wait();
+  console.log("✅ Report verified! Gas used:", receipt.gasUsed.toString());
 }
 
-async function submitProject() {
-  console.log("\n--- Submit New Project ---");
-  const title = await question("Enter project title: ");
-  const description = await question("Enter project description: ");
+async function getReportInfo(contract, reportId) {
+  console.log(`\n📄 Fetching report #${reportId} information...`);
 
-  try {
-    console.log("\nSubmitting project...");
-    const tx = await contract.submitProject(title, description);
-    console.log("Transaction Hash:", tx.hash);
-    console.log("Waiting for confirmation...");
+  const reportInfo = await contract.getReportInfo(reportId);
 
-    const receipt = await tx.wait();
-    console.log("Project submitted successfully!");
-    console.log("Block Number:", receipt.blockNumber);
-    console.log("Gas Used:", receipt.gasUsed.toString());
-
-    // Get project ID from event
-    const event = receipt.logs.find((log) => {
-      try {
-        return contract.interface.parseLog(log).name === "ProjectSubmitted";
-      } catch {
-        return false;
-      }
-    });
-
-    if (event) {
-      const parsedEvent = contract.interface.parseLog(event);
-      console.log("Project ID:", parsedEvent.args.projectId.toString());
-    }
-  } catch (error) {
-    console.error("Error:", error.message);
-  }
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log("👤 Reporter:", reportInfo[0]);
+  console.log("🕐 Timestamp:", new Date(Number(reportInfo[1]) * 1000).toISOString());
+  console.log("✓ Verified:", reportInfo[2]);
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 }
 
-async function viewProjectDetails() {
-  const projectId = await question("\nEnter project ID: ");
+async function finalizePeriod(contract) {
+  console.log("\n🔒 Finalizing current period...");
 
-  console.log("\n--- Project Details ---");
-  try {
-    const info = await contract.getProjectInfo(projectId);
+  const tx = await contract.finalizePeriod();
+  console.log("⏳ Transaction sent:", tx.hash);
 
-    console.log("Title:", info[0]);
-    console.log("Description:", info[1]);
-    console.log("Submitter:", info[2]);
-    console.log("Is Active:", info[3] ? "Yes" : "No");
-    console.log("Submission Time:", new Date(Number(info[4]) * 1000).toLocaleString());
-    console.log("Total Evaluations:", info[5].toString());
-    console.log("Results Revealed:", info[6] ? "Yes" : "No");
-
-    if (info[6]) {
-      console.log("Final Score:", info[7].toString());
-      console.log("Ranking:", info[8].toString());
-    }
-  } catch (error) {
-    console.error("Error:", error.message);
-  }
+  const receipt = await tx.wait();
+  console.log("✅ Period finalized! Gas used:", receipt.gasUsed.toString());
 }
 
-async function submitEvaluation() {
-  const projectId = await question("\nEnter project ID: ");
+async function getPeriodInfo(contract, periodNumber) {
+  console.log(`\n📊 Fetching period #${periodNumber} information...`);
 
-  console.log("\n--- Submit Evaluation (Score: 0-10) ---");
-  const innovation = await question("Innovation score: ");
-  const feasibility = await question("Feasibility score: ");
-  const impact = await question("Impact score: ");
-  const technical = await question("Technical score: ");
+  const periodInfo = await contract.getPeriodInfo(periodNumber);
 
-  try {
-    console.log("\nSubmitting evaluation...");
-    const tx = await contract.submitEvaluation(
-      projectId,
-      parseInt(innovation),
-      parseInt(feasibility),
-      parseInt(impact),
-      parseInt(technical)
-    );
-
-    console.log("Transaction Hash:", tx.hash);
-    console.log("Waiting for confirmation...");
-
-    const receipt = await tx.wait();
-    console.log("Evaluation submitted successfully!");
-    console.log("Block Number:", receipt.blockNumber);
-    console.log("Gas Used:", receipt.gasUsed.toString());
-  } catch (error) {
-    console.error("Error:", error.message);
-  }
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log("📝 Report Count:", periodInfo[0].toString());
+  console.log("🕐 Start Time:", new Date(Number(periodInfo[1]) * 1000).toISOString());
+  console.log("🕐 End Time:", periodInfo[2] > 0 ? new Date(Number(periodInfo[2]) * 1000).toISOString() : "Not ended");
+  console.log("✓ Finalized:", periodInfo[3]);
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 }
 
-async function authorizeEvaluator() {
-  const address = await question("\nEnter evaluator address: ");
+async function interactiveMode() {
+  console.log("🎯 Interactive Mode - Confidential Waste Recycling Platform");
+  console.log("═══════════════════════════════════════════════════════════\n");
 
-  try {
-    console.log("\nAuthorizing evaluator...");
-    const tx = await contract.authorizeEvaluator(address);
-    console.log("Transaction Hash:", tx.hash);
+  const { contract, contractAddress } = await loadContract();
+  const [signer] = await hre.ethers.getSigners();
 
-    const receipt = await tx.wait();
-    console.log("Evaluator authorized successfully!");
-  } catch (error) {
-    console.error("Error:", error.message);
+  console.log("📍 Contract:", contractAddress);
+  console.log("👤 Signer:", signer.address);
+
+  await getContractState(contract);
+
+  console.log("\n📋 Available Actions:");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log("1. View contract state");
+  console.log("2. Authorize reporter");
+  console.log("3. Add verifier");
+  console.log("4. Submit report");
+  console.log("5. Verify report");
+  console.log("6. Get report info");
+  console.log("7. Finalize period");
+  console.log("8. Get period info");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+  // Example: Authorize the signer as a reporter
+  console.log("🎬 Example: Authorizing current signer as reporter...");
+  const isAuthorized = await contract.isAuthorizedReporter(signer.address);
+
+  if (!isAuthorized) {
+    await authorizeReporter(contract, signer.address);
+  } else {
+    console.log("✓ Already authorized");
   }
-}
 
-async function revokeEvaluator() {
-  const address = await question("\nEnter evaluator address: ");
-
-  try {
-    console.log("\nRevoking evaluator...");
-    const tx = await contract.revokeEvaluator(address);
-    console.log("Transaction Hash:", tx.hash);
-
-    const receipt = await tx.wait();
-    console.log("Evaluator revoked successfully!");
-  } catch (error) {
-    console.error("Error:", error.message);
-  }
-}
-
-async function startEvaluationPeriod() {
-  const days = await question("\nEnter duration in days: ");
-  const duration = parseInt(days) * 24 * 60 * 60; // Convert to seconds
-
-  try {
-    console.log("\nStarting evaluation period...");
-    const tx = await contract.startEvaluationPeriod(duration);
-    console.log("Transaction Hash:", tx.hash);
-
-    const receipt = await tx.wait();
-    console.log("Evaluation period started successfully!");
-  } catch (error) {
-    console.error("Error:", error.message);
-  }
-}
-
-async function endEvaluationPeriod() {
-  try {
-    console.log("\nEnding evaluation period...");
-    const tx = await contract.endEvaluationPeriod();
-    console.log("Transaction Hash:", tx.hash);
-
-    const receipt = await tx.wait();
-    console.log("Evaluation period ended successfully!");
-  } catch (error) {
-    console.error("Error:", error.message);
-  }
-}
-
-async function revealResults() {
-  const projectId = await question("\nEnter project ID: ");
-
-  try {
-    console.log("\nRevealing results...");
-    const tx = await contract.revealResults(projectId);
-    console.log("Transaction Hash:", tx.hash);
-
-    const receipt = await tx.wait();
-    console.log("Results revelation initiated!");
-    console.log("Note: Decryption is asynchronous and may take a few blocks");
-  } catch (error) {
-    console.error("Error:", error.message);
-  }
-}
-
-async function viewAllProjects() {
-  const periodId = await question("\nEnter period ID: ");
-
-  console.log("\n--- Projects in Period ---");
-  try {
-    const projectIds = await contract.getProjectsByPeriod(periodId);
-
-    if (projectIds.length === 0) {
-      console.log("No projects found in this period");
-      return;
-    }
-
-    console.log(`Found ${projectIds.length} project(s):\n`);
-
-    for (const id of projectIds) {
-      const info = await contract.getProjectInfo(id);
-      console.log(`Project #${id}:`);
-      console.log(`  Title: ${info[0]}`);
-      console.log(`  Evaluations: ${info[5].toString()}`);
-      console.log(`  Results Revealed: ${info[6] ? "Yes" : "No"}`);
-      if (info[6]) {
-        console.log(`  Final Score: ${info[7].toString()}`);
-        console.log(`  Ranking: ${info[8].toString()}`);
-      }
-      console.log();
-    }
-  } catch (error) {
-    console.error("Error:", error.message);
-  }
-}
-
-async function checkEvaluationStatus() {
-  const projectId = await question("\nEnter project ID: ");
-  const evaluatorAddress = await question("Enter evaluator address (press Enter for your address): ");
-
-  const address = evaluatorAddress.trim() || signer.address;
-
-  console.log("\n--- Evaluation Status ---");
-  try {
-    const hasEvaluated = await contract.hasEvaluated(projectId, address);
-    console.log("Evaluator:", address);
-    console.log("Has Evaluated:", hasEvaluated ? "Yes" : "No");
-  } catch (error) {
-    console.error("Error:", error.message);
-  }
+  console.log("\n💡 You can now interact with the contract using the functions in this script");
+  console.log("💡 Modify this script to perform different actions");
 }
 
 async function main() {
-  await loadContract();
-
-  let running = true;
-
-  while (running) {
-    const choice = await displayMenu();
-
-    switch (choice) {
-      case "1":
-        await viewContractInfo();
-        break;
-      case "2":
-        await viewCurrentPeriod();
-        break;
-      case "3":
-        await submitProject();
-        break;
-      case "4":
-        await viewProjectDetails();
-        break;
-      case "5":
-        await submitEvaluation();
-        break;
-      case "6":
-        await authorizeEvaluator();
-        break;
-      case "7":
-        await revokeEvaluator();
-        break;
-      case "8":
-        await startEvaluationPeriod();
-        break;
-      case "9":
-        await endEvaluationPeriod();
-        break;
-      case "10":
-        await revealResults();
-        break;
-      case "11":
-        await viewAllProjects();
-        break;
-      case "12":
-        await checkEvaluationStatus();
-        break;
-      case "0":
-        console.log("\nExiting...");
-        running = false;
-        break;
-      default:
-        console.log("\nInvalid choice. Please try again.");
-    }
-
-    if (running) {
-      await question("\nPress Enter to continue...");
-    }
-  }
-
-  rl.close();
-  console.log("\nGoodbye!\n");
+  await interactiveMode();
 }
 
-// Execute script
+// Execute if run directly
 if (require.main === module) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {
-      console.error("\n========================================");
-      console.error("Interaction Script Failed!");
-      console.error("========================================\n");
-      console.error("Error:", error.message);
-      rl.close();
+      console.error("\n❌ Error:");
+      console.error(error);
       process.exit(1);
     });
 }
 
-module.exports = main;
+module.exports = {
+  loadContract,
+  getContractState,
+  authorizeReporter,
+  addVerifier,
+  submitReport,
+  verifyReport,
+  getReportInfo,
+  finalizePeriod,
+  getPeriodInfo
+};

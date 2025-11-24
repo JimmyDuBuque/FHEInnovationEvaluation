@@ -1,275 +1,225 @@
-const { ethers, network } = require("hardhat");
+const hre = require("hardhat");
 
 /**
- * Simulation script for testing deployment and contract functionality
- * Runs through a complete workflow without actual deployment
+ * Simulation script for testing the Confidential Waste Recycling Platform
+ * This script simulates a complete workflow with multiple reporters and periods
  */
-async function main() {
-  console.log("\n========================================");
-  console.log("Deployment Simulation");
-  console.log("========================================\n");
 
-  console.log("Network:", network.name);
-  console.log("Simulation Mode: Dry Run");
-  console.log();
+async function deployContract() {
+  console.log("🚀 Deploying contract for simulation...\n");
 
-  // Get signers
-  const signers = await ethers.getSigners();
-  const deployer = signers[0];
-  const user1 = signers[1];
-  const user2 = signers[2];
+  const ConfidentialWasteRecycling = await hre.ethers.getContractFactory("ConfidentialWasteRecycling");
+  const contract = await ConfidentialWasteRecycling.deploy();
+  await contract.waitForDeployment();
 
-  console.log("Accounts:");
-  console.log("---------");
-  console.log("Deployer:", deployer.address);
-  console.log("User 1:", user1.address);
-  console.log("User 2:", user2.address);
-  console.log();
+  const contractAddress = await contract.getAddress();
+  console.log("✅ Contract deployed at:", contractAddress, "\n");
 
-  // Check balances
-  for (let i = 0; i < 3; i++) {
-    const balance = await ethers.provider.getBalance(signers[i].address);
-    console.log(`Account ${i} Balance:`, ethers.formatEther(balance), "ETH");
+  return contract;
+}
+
+async function setupReporters(contract, signers) {
+  console.log("👥 Setting up reporters...\n");
+
+  const reporters = [];
+
+  for (let i = 1; i <= 3; i++) {
+    const reporter = signers[i];
+    console.log(`🔐 Authorizing reporter ${i}: ${reporter.address}`);
+
+    const tx = await contract.authorizeReporter(reporter.address);
+    await tx.wait();
+
+    reporters.push(reporter);
+    console.log(`✅ Reporter ${i} authorized\n`);
   }
-  console.log();
 
-  // Simulate deployment
-  console.log("========================================");
-  console.log("Step 1: Contract Deployment");
-  console.log("========================================\n");
+  return reporters;
+}
 
-  console.log("Deploying contract...");
-  const ContractFactory = await ethers.getContractFactory("AnonymousInnovationEvaluation");
+async function setupVerifiers(contract, signers) {
+  console.log("🔍 Setting up verifiers...\n");
 
-  let contract;
-  let deploymentGas;
+  const verifier = signers[4];
+  console.log(`🔐 Adding verifier: ${verifier.address}`);
 
-  if (network.name === "hardhat" || network.name === "localhost") {
-    contract = await ContractFactory.deploy();
-    await contract.waitForDeployment();
-    const contractAddress = await contract.getAddress();
+  const tx = await contract.addVerifier(verifier.address);
+  await tx.wait();
 
-    console.log("Contract deployed at:", contractAddress);
+  console.log(`✅ Verifier added\n`);
 
-    // Get deployment transaction
-    const deployTx = contract.deploymentTransaction();
-    const receipt = await deployTx.wait();
-    deploymentGas = receipt.gasUsed;
+  return verifier;
+}
 
-    console.log("Deployment Gas Used:", deploymentGas.toString());
-    console.log();
-  } else {
-    console.log("Simulating deployment on", network.name);
-    console.log("(Use --network localhost or hardhat for actual local deployment)");
-    console.log();
+function generateRandomReportData() {
+  return {
+    plasticWeight: Math.floor(Math.random() * 500) + 100,    // 100-600 kg
+    paperWeight: Math.floor(Math.random() * 400) + 100,      // 100-500 kg
+    glassWeight: Math.floor(Math.random() * 300) + 50,       // 50-350 kg
+    metalWeight: Math.floor(Math.random() * 200) + 50,       // 50-250 kg
+    organicWeight: Math.floor(Math.random() * 600) + 200,    // 200-800 kg
+    energyGenerated: Math.floor(Math.random() * 1000) + 500, // 500-1500 kWh
+    carbonReduced: Math.floor(Math.random() * 800) + 200     // 200-1000 kg
+  };
+}
 
-    // Estimate deployment gas
-    const deploymentData = ContractFactory.getDeployTransaction();
-    const estimatedGas = await ethers.provider.estimateGas({
-      data: deploymentData.data,
-      from: deployer.address,
+async function simulateReportingPeriod(contract, reporters, verifier, periodNumber) {
+  console.log(`\n${"═".repeat(60)}`);
+  console.log(`📅 PERIOD ${periodNumber} - Reporting Phase`);
+  console.log(`${"═".repeat(60)}\n`);
+
+  const reportIds = [];
+
+  // Each reporter submits a report
+  for (let i = 0; i < reporters.length; i++) {
+    const reporter = reporters[i];
+    const reportData = generateRandomReportData();
+
+    console.log(`\n📝 Reporter ${i + 1} submitting report...`);
+    console.log(`   Plastic: ${reportData.plasticWeight} kg`);
+    console.log(`   Paper: ${reportData.paperWeight} kg`);
+    console.log(`   Glass: ${reportData.glassWeight} kg`);
+    console.log(`   Metal: ${reportData.metalWeight} kg`);
+    console.log(`   Organic: ${reportData.organicWeight} kg`);
+    console.log(`   Energy Generated: ${reportData.energyGenerated} kWh`);
+    console.log(`   Carbon Reduced: ${reportData.carbonReduced} kg`);
+
+    const tx = await contract.connect(reporter).submitReport(
+      reportData.plasticWeight,
+      reportData.paperWeight,
+      reportData.glassWeight,
+      reportData.metalWeight,
+      reportData.organicWeight,
+      reportData.energyGenerated,
+      reportData.carbonReduced
+    );
+
+    const receipt = await tx.wait();
+    console.log(`   ✅ Report submitted (Gas: ${receipt.gasUsed.toString()})`);
+
+    // Extract report ID from event
+    const event = receipt.logs.find(log => {
+      try {
+        return contract.interface.parseLog(log).name === "ReportSubmitted";
+      } catch {
+        return false;
+      }
     });
 
-    console.log("Estimated Deployment Gas:", estimatedGas.toString());
-
-    // Get current gas price
-    const feeData = await ethers.provider.getFeeData();
-    const gasPrice = feeData.gasPrice || 0n;
-    const estimatedCost = estimatedGas * gasPrice;
-
-    console.log("Current Gas Price:", ethers.formatUnits(gasPrice, "gwei"), "gwei");
-    console.log("Estimated Cost:", ethers.formatEther(estimatedCost), "ETH");
-    console.log();
-    console.log("Note: This is a simulation. No actual deployment occurred.");
-    return;
+    if (event) {
+      const parsedEvent = contract.interface.parseLog(event);
+      const reportId = parsedEvent.args.reportId;
+      reportIds.push(reportId);
+      console.log(`   📋 Report ID: ${reportId}`);
+    }
   }
 
-  // Test basic functionality
-  console.log("========================================");
-  console.log("Step 2: Testing Basic Functions");
-  console.log("========================================\n");
+  console.log(`\n${"─".repeat(60)}`);
+  console.log(`📅 PERIOD ${periodNumber} - Verification Phase`);
+  console.log(`${"─".repeat(60)}\n`);
 
-  console.log("Testing owner...");
-  const owner = await contract.owner();
-  console.log("Owner:", owner);
-  console.log("Owner Match:", owner === deployer.address ? "✓ Success" : "✗ Failed");
+  // Verify all reports
+  for (const reportId of reportIds) {
+    console.log(`✅ Verifying report #${reportId}...`);
+
+    const tx = await contract.connect(verifier).verifyReport(reportId);
+    const receipt = await tx.wait();
+
+    console.log(`   ✓ Verified (Gas: ${receipt.gasUsed.toString()})`);
+  }
+
+  console.log(`\n${"─".repeat(60)}`);
+  console.log(`📅 PERIOD ${periodNumber} - Period Summary`);
+  console.log(`${"─".repeat(60)}\n`);
+
+  const periodInfo = await contract.getPeriodInfo(periodNumber);
+  console.log(`📊 Period Statistics:`);
+  console.log(`   Total Reports: ${periodInfo[0]}`);
+  console.log(`   Start Time: ${new Date(Number(periodInfo[1]) * 1000).toISOString()}`);
+  console.log(`   Status: ${periodInfo[3] ? "Finalized" : "Active"}`);
+
+  return reportIds;
+}
+
+async function displayFinalStats(contract) {
+  console.log(`\n${"═".repeat(60)}`);
+  console.log(`📊 FINAL SIMULATION STATISTICS`);
+  console.log(`${"═".repeat(60)}\n`);
+
+  const totalReports = await contract.totalReports();
+  const currentPeriod = await contract.currentPeriod();
+
+  console.log(`Total Reports Submitted: ${totalReports}`);
+  console.log(`Total Periods: ${currentPeriod}`);
   console.log();
 
-  console.log("Testing current period...");
-  const currentPeriod = await contract.getCurrentEvaluationPeriod();
-  console.log("Current Period:", currentPeriod.toString());
-  console.log("Period Check:", currentPeriod === 1n ? "✓ Success" : "✗ Failed");
-  console.log();
+  for (let i = 1; i <= currentPeriod; i++) {
+    const periodInfo = await contract.getPeriodInfo(i);
 
-  console.log("Testing next project ID...");
-  const nextProjectId = await contract.nextProjectId();
-  console.log("Next Project ID:", nextProjectId.toString());
-  console.log("ID Check:", nextProjectId === 1n ? "✓ Success" : "✗ Failed");
-  console.log();
+    console.log(`Period ${i}:`);
+    console.log(`   Reports: ${periodInfo[0]}`);
+    console.log(`   Start: ${new Date(Number(periodInfo[1]) * 1000).toISOString()}`);
 
-  // Simulate project submission
-  console.log("========================================");
-  console.log("Step 3: Simulating Project Submission");
-  console.log("========================================\n");
+    if (periodInfo[2] > 0) {
+      console.log(`   End: ${new Date(Number(periodInfo[2]) * 1000).toISOString()}`);
+    }
 
-  console.log("User 1 submitting project...");
-  const tx1 = await contract.connect(user1).submitProject(
-    "Innovative Blockchain Solution",
-    "A revolutionary approach to decentralized evaluation systems"
-  );
-  const receipt1 = await tx1.wait();
-
-  console.log("Transaction Hash:", tx1.hash);
-  console.log("Gas Used:", receipt1.gasUsed.toString());
-  console.log("✓ Project submitted successfully");
-  console.log();
-
-  console.log("User 2 submitting project...");
-  const tx2 = await contract.connect(user2).submitProject(
-    "Privacy-First Data Platform",
-    "Secure data handling with homomorphic encryption"
-  );
-  const receipt2 = await tx2.wait();
-
-  console.log("Transaction Hash:", tx2.hash);
-  console.log("Gas Used:", receipt2.gasUsed.toString());
-  console.log("✓ Project submitted successfully");
-  console.log();
-
-  // View project details
-  console.log("========================================");
-  console.log("Step 4: Viewing Project Details");
-  console.log("========================================\n");
-
-  for (let projectId = 1; projectId <= 2; projectId++) {
-    const info = await contract.getProjectInfo(projectId);
-    console.log(`Project #${projectId}:`);
-    console.log("  Title:", info[0]);
-    console.log("  Description:", info[1]);
-    console.log("  Submitter:", info[2]);
-    console.log("  Is Active:", info[3] ? "Yes" : "No");
-    console.log("  Total Evaluations:", info[5].toString());
+    console.log(`   Finalized: ${periodInfo[3]}`);
     console.log();
   }
 
-  // Simulate evaluations
-  console.log("========================================");
-  console.log("Step 5: Simulating Evaluations");
-  console.log("========================================\n");
+  console.log(`${"═".repeat(60)}\n`);
+}
 
-  console.log("Deployer evaluating Project #1...");
-  const evalTx1 = await contract.connect(deployer).submitEvaluation(1, 8, 7, 9, 8);
-  const evalReceipt1 = await evalTx1.wait();
-  console.log("Gas Used:", evalReceipt1.gasUsed.toString());
-  console.log("✓ Evaluation submitted");
-  console.log();
+async function main() {
+  console.log("\n🎬 Starting Confidential Waste Recycling Platform Simulation");
+  console.log("═".repeat(60), "\n");
 
-  console.log("User 2 evaluating Project #1...");
-  const evalTx2 = await contract.connect(user2).submitEvaluation(1, 9, 8, 9, 7);
-  const evalReceipt2 = await evalTx2.wait();
-  console.log("Gas Used:", evalReceipt2.gasUsed.toString());
-  console.log("✓ Evaluation submitted");
-  console.log();
+  // Get signers
+  const signers = await hre.ethers.getSigners();
+  console.log(`👤 Available signers: ${signers.length}\n`);
 
-  console.log("Deployer evaluating Project #2...");
-  const evalTx3 = await contract.connect(deployer).submitEvaluation(2, 7, 8, 8, 9);
-  const evalReceipt3 = await evalTx3.wait();
-  console.log("Gas Used:", evalReceipt3.gasUsed.toString());
-  console.log("✓ Evaluation submitted");
-  console.log();
-
-  console.log("User 1 evaluating Project #2...");
-  const evalTx4 = await contract.connect(user1).submitEvaluation(2, 8, 8, 7, 8);
-  const evalReceipt4 = await evalTx4.wait();
-  console.log("Gas Used:", evalReceipt4.gasUsed.toString());
-  console.log("✓ Evaluation submitted");
-  console.log();
-
-  // Check evaluation status
-  console.log("========================================");
-  console.log("Step 6: Checking Evaluation Status");
-  console.log("========================================\n");
-
-  const hasEvaluated1 = await contract.hasEvaluated(1, deployer.address);
-  console.log("Deployer evaluated Project #1:", hasEvaluated1 ? "Yes" : "No");
-
-  const hasEvaluated2 = await contract.hasEvaluated(1, user2.address);
-  console.log("User 2 evaluated Project #1:", hasEvaluated2 ? "Yes" : "No");
-
-  const hasEvaluated3 = await contract.hasEvaluated(2, deployer.address);
-  console.log("Deployer evaluated Project #2:", hasEvaluated3 ? "Yes" : "No");
-  console.log();
-
-  // View updated project info
-  console.log("========================================");
-  console.log("Step 7: Updated Project Information");
-  console.log("========================================\n");
-
-  for (let projectId = 1; projectId <= 2; projectId++) {
-    const info = await contract.getProjectInfo(projectId);
-    console.log(`Project #${projectId}:`);
-    console.log("  Title:", info[0]);
-    console.log("  Total Evaluations:", info[5].toString());
-    console.log("  Results Revealed:", info[6] ? "Yes" : "No");
-    console.log();
+  if (signers.length < 5) {
+    throw new Error("❌ Need at least 5 signers for simulation. Please run on localhost network.");
   }
 
-  // Gas usage summary
-  console.log("========================================");
-  console.log("Gas Usage Summary");
-  console.log("========================================\n");
+  // Deploy contract
+  const contract = await deployContract();
 
-  const totalGas =
-    deploymentGas +
-    receipt1.gasUsed +
-    receipt2.gasUsed +
-    evalReceipt1.gasUsed +
-    evalReceipt2.gasUsed +
-    evalReceipt3.gasUsed +
-    evalReceipt4.gasUsed;
+  // Setup
+  const reporters = await setupReporters(contract, signers);
+  const verifier = await setupVerifiers(contract, signers);
 
-  console.log("Deployment:", deploymentGas.toString());
-  console.log("Project Submissions:", (receipt1.gasUsed + receipt2.gasUsed).toString());
-  console.log(
-    "Evaluations:",
-    (evalReceipt1.gasUsed + evalReceipt2.gasUsed + evalReceipt3.gasUsed + evalReceipt4.gasUsed).toString()
-  );
-  console.log("---");
-  console.log("Total Gas Used:", totalGas.toString());
-  console.log();
+  // Simulate multiple reporting periods
+  const numberOfPeriods = 2;
 
-  // Estimate cost at different gas prices
-  const gasPrices = [10, 30, 50, 100]; // gwei
-  console.log("Cost Estimates:");
-  console.log("---------------");
+  for (let period = 1; period <= numberOfPeriods; period++) {
+    await simulateReportingPeriod(contract, reporters, verifier, period);
 
-  for (const gwei of gasPrices) {
-    const gasPrice = ethers.parseUnits(gwei.toString(), "gwei");
-    const cost = totalGas * gasPrice;
-    console.log(`At ${gwei} gwei: ${ethers.formatEther(cost)} ETH`);
+    // Finalize period (except the last one to show active period)
+    if (period < numberOfPeriods) {
+      console.log(`\n🔒 Finalizing period ${period}...`);
+      const tx = await contract.finalizePeriod();
+      await tx.wait();
+      console.log(`✅ Period ${period} finalized\n`);
+
+      // Wait a bit before next period
+      console.log("⏳ Waiting before next period...\n");
+    }
   }
-  console.log();
 
-  console.log("========================================");
-  console.log("Simulation Complete!");
-  console.log("========================================\n");
+  // Display final statistics
+  await displayFinalStats(contract);
 
-  console.log("Summary:");
-  console.log("- Contract deployed and tested");
-  console.log("- 2 projects submitted");
-  console.log("- 4 evaluations submitted");
-  console.log("- All functions working correctly");
-  console.log();
-
-  console.log("Note: Results are encrypted and require reveal process");
-  console.log("      to view final scores and rankings");
-  console.log();
-
-  return {
-    contract,
-    contractAddress: await contract.getAddress(),
-    totalGas,
-  };
+  console.log("🎉 Simulation completed successfully!");
+  console.log("\n💡 Key Features Demonstrated:");
+  console.log("   ✓ Reporter authorization");
+  console.log("   ✓ Verifier management");
+  console.log("   ✓ Confidential report submission");
+  console.log("   ✓ Report verification");
+  console.log("   ✓ Period management");
+  console.log("   ✓ Statistics aggregation");
+  console.log("\n");
 }
 
 // Execute simulation
@@ -277,16 +227,10 @@ if (require.main === module) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {
-      console.error("\n========================================");
-      console.error("Simulation Failed!");
-      console.error("========================================\n");
-      console.error("Error:", error.message);
-      if (error.stack) {
-        console.error("\nStack Trace:");
-        console.error(error.stack);
-      }
+      console.error("\n❌ Simulation failed:");
+      console.error(error);
       process.exit(1);
     });
 }
 
-module.exports = main;
+module.exports = { main };
